@@ -1,0 +1,14 @@
+[package]
+name = "drogue-mpu-6050"
+version = "0.1.0"
+authors = ["Bob McWhirter <bmcwhirt@redhat.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+embedded-hal = { version = "0.2.4", features = ["unproven"] }
+embedded-time = "0.10.0"
+drogue-embedded-timer = "0.2.1"
+log = "0.4.11"
+libm = "0.2.1"
