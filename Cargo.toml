@@ -6,7 +6,7 @@ edition = "2018"
 license = "Apache-2.0"
 description = "InvenSense MPU-6050 i2c Driver"
 repository = "https://github.com/drogue-iot/drogue-mpu-6050"
-keywords = [ "driver", "i2c", "invensense", "motion", "dmp", "no_std" ]
+keywords = [ "driver", "i2c", "motion", "dmp", "no_std" ]
 categories = ["no-std", "embedded"]
 readme = "README.md"
 
