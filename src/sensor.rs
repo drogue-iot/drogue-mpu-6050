@@ -1,42 +1,37 @@
-use embedded_hal::blocking::i2c::{WriteRead, Write};
-use crate::address::Address;
-use crate::error::Error;
-use crate::registers::Register;
 use crate::accel::{Accel, AccelFullScale};
-use crate::gyro::{Gyro, GyroFullScale};
-use crate::fifo::Fifo;
-use drogue_embedded_timer::Delay;
-use embedded_time::duration::Milliseconds;
+use crate::address::Address;
 use crate::clock_source::ClockSource;
 use crate::config::DigitalLowPassFilter;
-use core::marker::PhantomData;
+use crate::error::Error;
+use crate::fifo::Fifo;
+use crate::gyro::{Gyro, GyroFullScale};
+use crate::registers::Register;
+
+use embedded_hal::blocking::delay::DelayMs;
+use embedded_hal::blocking::i2c::{Write, WriteRead};
 
 /// InvenSense MPU-6050 Driver
-pub struct Mpu6050<'clock, I2c, Clock>
-    where I2c: Write + WriteRead,
-          <I2c as WriteRead>::Error: core::fmt::Debug,
-          <I2c as Write>::Error: core::fmt::Debug,
-          Clock: embedded_time::Clock,
-
+pub struct Mpu6050<I2c>
+where
+    I2c: Write + WriteRead,
+    <I2c as WriteRead>::Error: core::fmt::Debug,
+    <I2c as Write>::Error: core::fmt::Debug,
 {
     i2c: I2c,
     address: u8,
-    clock: &'clock Clock,
 }
 
-impl<'clock, I2c, Clock> Mpu6050<'clock, I2c, Clock>
-    where I2c: Write + WriteRead,
-          <I2c as WriteRead>::Error: core::fmt::Debug,
-          <I2c as Write>::Error: core::fmt::Debug,
-          Clock: embedded_time::Clock,
+impl<I2c> Mpu6050<I2c>
+where
+    I2c: Write + WriteRead,
+    <I2c as WriteRead>::Error: core::fmt::Debug,
+    <I2c as Write>::Error: core::fmt::Debug,
 {
-
     /// Construct a new i2c driver for the MPU-6050
-    pub fn new(i2c: I2c, address: Address, clock: &'clock Clock) -> Result<Self, Error<I2c>> {
+    pub fn new(i2c: I2c, address: Address) -> Result<Self, Error<I2c>> {
         let mut sensor = Self {
             i2c,
             address: address.into(),
-            clock,
         };
 
         sensor.disable_sleep()?;
@@ -45,10 +40,10 @@ impl<'clock, I2c, Clock> Mpu6050<'clock, I2c, Clock>
     }
 
     /// Load DMP firmware and perform all appropriate initialization.
-    pub fn initialize_dmp(&mut self) -> Result<(), Error<I2c>> {
-        self.reset()?;
+    pub fn initialize_dmp<D: DelayMs<u8>>(&mut self, delay: &mut D) -> Result<(), Error<I2c>> {
+        self.reset(delay)?;
         self.disable_sleep()?;
-        self.reset_signal_path()?;
+        self.reset_signal_path(delay)?;
         self.disable_dmp()?;
         self.set_clock_source(ClockSource::Xgyro)?;
         self.disable_interrupts()?;
@@ -67,32 +62,29 @@ impl<'clock, I2c, Clock> Mpu6050<'clock, I2c, Clock>
     }
 
     pub(crate) fn read(&mut self, bytes: &[u8], response: &mut [u8]) -> Result<(), Error<I2c>> {
-        self.i2c.write_read(
-            self.address,
-            bytes,
-            response,
-        ).map_err(|e| Error::WriteReadError(e))
+        self.i2c
+            .write_read(self.address, bytes, response)
+            .map_err(|e| Error::WriteReadError(e))
     }
 
     pub(crate) fn write(&mut self, bytes: &[u8]) -> Result<(), Error<I2c>> {
-        self.i2c.write(
-            self.address,
-            bytes)
+        self.i2c
+            .write(self.address, bytes)
             .map_err(|e| Error::WriteError(e))
     }
 
     pub(crate) fn read_register<'a>(&mut self, reg: Register) -> Result<u8, Error<I2c>> {
         let mut buf = [0; 1];
-        self.read(
-            &[reg as u8],
-            &mut buf)?;
+        self.read(&[reg as u8], &mut buf)?;
         Ok(buf[0])
     }
 
-    pub(crate) fn read_registers<'a>(&mut self, reg: Register, buf: &'a mut [u8]) -> Result<&'a [u8], Error<I2c>> {
-        self.read(
-            &[reg as u8],
-            buf)?;
+    pub(crate) fn read_registers<'a>(
+        &mut self,
+        reg: Register,
+        buf: &'a mut [u8],
+    ) -> Result<&'a [u8], Error<I2c>> {
+        self.read(&[reg as u8], buf)?;
         Ok(buf)
     }
 
@@ -104,20 +96,20 @@ impl<'clock, I2c, Clock> Mpu6050<'clock, I2c, Clock>
     // ------------------------------------------------------------------------
 
     /// Perform power reset of the MPU
-    pub fn reset(&mut self) -> Result<(), Error<I2c>> {
+    pub fn reset<D: DelayMs<u8>>(&mut self, delay: &mut D) -> Result<(), Error<I2c>> {
         let mut value = self.read_register(Register::PwrMgmt1)?;
         value |= (1 << 7);
         self.write_register(Register::PwrMgmt1, value)?;
-        Delay::new(self.clock).delay(Milliseconds(200));
+        delay.delay_ms(200);
         Ok(())
     }
 
     /// Perform reset of the signal path
-    pub fn reset_signal_path(&mut self) -> Result<(), Error<I2c>> {
+    pub fn reset_signal_path<D: DelayMs<u8>>(&mut self, delay: &mut D) -> Result<(), Error<I2c>> {
         let mut value = self.read_register(Register::UserCtrl)?;
         value |= (1 << 0);
         self.write_register(Register::UserCtrl, value)?;
-        Delay::new(self.clock).delay(Milliseconds(200));
+        delay.delay_ms(200);
         Ok(())
     }
 
@@ -153,7 +145,10 @@ impl<'clock, I2c, Clock> Mpu6050<'clock, I2c, Clock>
         self.write_register(Register::SmpRtDiv, div)
     }
 
-    pub fn set_digital_lowpass_filter(&mut self, filter: DigitalLowPassFilter) -> Result<(), Error<I2c>> {
+    pub fn set_digital_lowpass_filter(
+        &mut self,
+        filter: DigitalLowPassFilter,
+    ) -> Result<(), Error<I2c>> {
         let mut value = self.read_register(Register::Config)?;
         value |= (filter as u8);
         self.write_register(Register::Config, value)
